@@ -1,0 +1,121 @@
+#include <SPI.h>              
+#include <Adafruit_PN532.h>  
+#include <ESP32Servo.h>      
+
+#define SS   5    // Pin de selección del PN532
+#define SCK  14   // Pin de reloj SPI
+#define MISO 12   // Datos del PN532 al ESP32
+#define MOSI 13   // Datos del ESP32 al PN532
+
+// ---------- SERVO ----------
+#define SERVO_PIN 9   
+Servo puerta;         // Objeto servo (representa la puerta)
+
+// ---------- BUZZER ----------
+#define BUZZER_PIN 10  
+
+// Crear objeto PN532
+Adafruit_PN532 nfc(SS);
+
+// UID válido (tarjeta autorizada)
+uint8_t tarjetaValida[] = {0x0E, 0xB4, 0x14, 0x07};
+
+// ---------- FUNCIÓN PARA COMPARAR UID ----------
+bool compararUID(uint8_t *uid, uint8_t *valido, uint8_t length) {
+  for (int i = 0; i < length; i++) {
+    if (uid[i] != valido[i]) return false; // Si algún byte no coincide, regresa falso
+  }
+  return true; // Si todo coincide, regresa verdadero
+}
+
+// ---------- FUNCIÓN PARA ABRIR PUERTA ----------
+void abrirPuerta() {
+  for (int i = 0; i <= 90; i++) {
+    puerta.write(i); // Mueve el servo de 0° a 90°
+    delay(10);       
+  }
+}
+
+// ---------- FUNCIÓN PARA CERRAR PUERTA ----------
+void cerrarPuerta() {
+  for (int i = 90; i >= 0; i--) {
+    puerta.write(i); // Mueve el servo de 90° a 0°
+    delay(10);       
+  }
+}
+
+// ---------- FUNCIÓN DE ALARMA (BUZZER) ----------
+void alarma() {
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(300);
+    digitalWrite(BUZZER_PIN, LOW);  
+    delay(200);
+  }
+  digitalWrite(BUZZER_PIN, HIGH); 
+  delay(700); 
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+void setup() {
+  Serial.begin(115200); 
+  Serial.println("Iniciando sistema...");
+
+  // ---------- INICIALIZAR SPI Y NFC ----------
+  SPI.begin(SCK, MISO, MOSI, SS); // Configura comunicación SPI
+  nfc.begin();                    // Inicia PN532
+
+  // Verifica si el PN532 está conectado
+  if (!nfc.getFirmwareVersion()) {
+    Serial.println("No se encontró PN532");
+    while (1); // Detiene el programa si no lo detecta
+  }
+
+  Serial.println("PN532 detectado");
+  nfc.SAMConfig(); // Configura el lector para leer tarjetas
+
+  // ---------- CONFIGURAR SERVO ----------
+  puerta.setPeriodHertz(50);           
+  puerta.attach(SERVO_PIN, 500, 2400); 
+  puerta.write(0);                     
+
+  // ---------- CONFIGURAR BUZZER ----------
+  pinMode(BUZZER_PIN, OUTPUT); 
+  digitalWrite(BUZZER_PIN, LOW); 
+}
+
+void loop() {
+  uint8_t uid[7];     // Arreglo para guardar el UID de la tarjeta
+  uint8_t uidLength;  // Longitud del UID
+
+  // Intenta leer una tarjeta NFC
+  if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength)) {
+
+    Serial.println("\nTarjeta detectada");
+
+    // ---------- MOSTRAR UID ----------
+    Serial.print("UID: ");
+    for (int i = 0; i < uidLength; i++) {
+      Serial.print(uid[i], HEX); // Muestra el UID en hexadecimal
+      Serial.print(" ");
+    }
+    Serial.println();
+
+    // ---------- VALIDAR TARJETA ----------
+    if (compararUID(uid, tarjetaValida, uidLength)) {
+      Serial.println("ACCESO PERMITIDO");
+
+      abrirPuerta();   
+      delay(3000);     
+      cerrarPuerta();  
+
+    } else {
+      Serial.println("ACCESO DENEGADO");
+
+      alarma(); // Activa el buzzer como alerta
+      delay(1000);
+    }
+
+    delay(1000); 
+  }
+}
